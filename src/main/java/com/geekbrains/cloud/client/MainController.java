@@ -1,11 +1,6 @@
 package com.geekbrains.cloud.client;
 
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.io.InputStream;
+import java.io.*;
 import java.net.Socket;
 import java.net.URL;
 import java.util.ResourceBundle;
@@ -25,12 +20,12 @@ public class MainController implements Initializable {
     public ListView<String> clientView;
     public ListView<String> serverView;
     private File currentDirectory;
+    private String serverDirectory;
 
     private DataInputStream is;
     private DataOutputStream os;
     private byte[] buf;
 
-    // Platform.runLater(() -> {})
     private void updateClientView() {
         Platform.runLater(() -> {
             clientPath.setText(currentDirectory.getAbsolutePath());
@@ -41,16 +36,56 @@ public class MainController implements Initializable {
         });
     }
 
-    public void download(ActionEvent actionEvent) {
-
+    private void updateServerView()  {
+        try {
+            os.writeUTF("#Update_server_view#");
+            os.writeUTF(serverDirectory);
+            Platform.runLater(()-> {
+                try {
+                    serverPath.setText(is.readUTF());
+                    serverView.getItems().clear();
+                    serverView.getItems().add("...");
+                    while (is.available() > 0) {
+                        serverView.getItems().addAll(is.readUTF());
+                    }
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            });
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
-    // upload file to server
+    public void download(ActionEvent actionEvent) {
+        String item = serverView.getSelectionModel().getSelectedItem();
+        try {
+            os.writeUTF("#Server_to_Client#");
+            os.writeUTF(item);
+            String name = is.readUTF();
+            long size = is.readLong();
+            File newFile = currentDirectory.toPath()
+                    .resolve(name)
+                    .toFile();
+            try (OutputStream fos = new FileOutputStream(newFile)) {
+                for (int i = 0; i < (size + BUFFER_SIZE - 1) / BUFFER_SIZE; i++) {
+                    int readCount = is.read(buf);
+                    fos.write(buf, 0, readCount);
+                }
+            }
+            updateClientView();
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
     public void upload(ActionEvent actionEvent) throws IOException {
         String item = clientView.getSelectionModel().getSelectedItem();
         File selected = currentDirectory.toPath().resolve(item).toFile();
         if (selected.isFile()) {
-            os.writeUTF("#file_message#");
+            os.writeUTF("#Client_to_Server#");
             os.writeUTF(selected.getName());
             os.writeLong(selected.length());
             try (InputStream fis = new FileInputStream(selected)) {
@@ -60,11 +95,13 @@ public class MainController implements Initializable {
                 }
             }
             os.flush();
+            updateServerView();
         }
     }
 
     private void initNetwork() {
         try {
+            serverDirectory = "...";
             buf = new byte[BUFFER_SIZE];
             Socket socket = new Socket("localhost", 8189);
             is = new DataInputStream(socket.getInputStream());
@@ -77,12 +114,9 @@ public class MainController implements Initializable {
     @Override
     public void initialize(URL location, ResourceBundle resources) {
         currentDirectory = new File(System.getProperty("user.home"));
-
-
-        // run in FX Thread
-        // :: - method reference
         updateClientView();
         initNetwork();
+        updateServerView();
         clientView.setOnMouseClicked(e -> {
             if (e.getClickCount() == 2) {
                 String item = clientView.getSelectionModel().getSelectedItem();
@@ -96,6 +130,12 @@ public class MainController implements Initializable {
                         updateClientView();
                     }
                 }
+            }
+        });
+        serverView.setOnMouseClicked(event -> {
+            if (event.getClickCount()==2){
+                serverDirectory = serverView.getSelectionModel().getSelectedItem();
+                updateServerView();
             }
         });
     }
